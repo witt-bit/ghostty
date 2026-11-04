@@ -172,8 +172,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "${GITHUB_REF_NAME}" ./*.zip \
-            --repo "${GITHUB_REPOSITORY}" \
-            --verify-tag \
-            --title "Ghostty ${GITHUB_REF_NAME} (quick terminal tabs)" \
-            --notes "Built from ${GITHUB_SHA} on top of ghostty-org/ghostty main plus ghostty-org/ghostty#9857 (quick terminal tabs). The app is ad-hoc signed: on first launch use right click > Open, or run \`xattr -d com.apple.quarantine /Applications/Ghostty.app\`."
+          sha256sum ./*.zip > SHA256SUMS
+          cat SHA256SUMS
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            # A release may already exist (created by hand); just add the
+            # newer universal build on top of it.
+            gh release upload "${GITHUB_REF_NAME}" ./*.zip SHA256SUMS \
+              --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" ./*.zip SHA256SUMS \
+              --repo "${GITHUB_REPOSITORY}" \
+              --verify-tag \
+              --latest \
+              --title "Ghostty ${GITHUB_REF_NAME} (quick terminal tabs)" \
+              --notes "Built from ${GITHUB_SHA} on top of ghostty-org/ghostty main plus ghostty-org/ghostty#9857 (quick terminal tabs). The app is ad-hoc signed: on first launch use right click > Open, or run \`xattr -d com.apple.quarantine /Applications/Ghostty.app\`."
+          fi
