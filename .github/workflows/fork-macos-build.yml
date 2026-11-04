@@ -172,15 +172,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          sha256sum ./*.zip > SHA256SUMS
-          cat SHA256SUMS
+          # One checksum file per asset so a later upload cannot invalidate
+          # the checksums published with an earlier asset.
+          for zip in ./*.zip; do
+            sha256sum "${zip}" > "${zip}.sha256"
+          done
+          cat ./*.sha256
           if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             # A release may already exist (created by hand); just add the
             # newer universal build on top of it.
-            gh release upload "${GITHUB_REF_NAME}" ./*.zip SHA256SUMS \
+            gh release upload "${GITHUB_REF_NAME}" ./*.zip ./*.sha256 \
               --repo "${GITHUB_REPOSITORY}" --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" ./*.zip SHA256SUMS \
+            gh release create "${GITHUB_REF_NAME}" ./*.zip ./*.sha256 \
               --repo "${GITHUB_REPOSITORY}" \
               --verify-tag \
               --latest \
