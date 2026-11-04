@@ -1,0 +1,89 @@
+name: Fork macOS Build
+
+# Fork-only workflow. Upstream's workflows require Namespace runners, Nix and
+# Cachix secrets that do not exist in this repository, so we build and test the
+# macOS app on a standard GitHub-hosted runner instead. Delete this file if you
+# no longer need it; it is not part of upstream and will conflict on rebases.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: fork-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Build & Test macOS
+    runs-on: macos-26
+    timeout-minutes: 180
+    env:
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode*.app || true
+          XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Selecting ${XCODE}"
+          sudo xcode-select -s "${XCODE}"
+          xcodebuild -version
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+
+      - name: Cache Zig build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .zig-cache
+            .zig-global-cache
+          key: zig-${{ runner.os }}-${{ runner.arch }}-0.17.0-${{ hashFiles('build.zig.zon') }}
+          restore-keys: |
+            zig-${{ runner.os }}-${{ runner.arch }}-0.17.0-
+
+      # Builds GhosttyKit.xcframework (Zig) and then Ghostty.app via xcodebuild
+      # in the ReleaseLocal configuration, which ad-hoc signs with "-" so no
+      # developer team is needed.
+      - name: Build Ghostty.app
+        run: zig build -Doptimize=ReleaseFast -Dxcframework-target=native
+
+      - name: Run Swift tests
+        run: |
+          cd macos
+          xcodebuild test -scheme Ghostty -skip-testing GhosttyUITests
+
+      - name: Package Ghostty.app
+        if: always()
+        run: |
+          set -euo pipefail
+          APP=macos/build/ReleaseLocal/Ghostty.app
+          if [ -d "${APP}" ]; then
+            ditto -c -k --sequesterRsrc --keepParent "${APP}" Ghostty.app.zip
+            ls -lh Ghostty.app.zip
+          else
+            echo "::warning::Ghostty.app was not produced, skipping packaging"
+            ls -R macos/build 2>/dev/null | head -50 || true
+          fi
+
+      - name: Upload Ghostty.app
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ghostty-macos-${{ github.sha }}
+          path: Ghostty.app.zip
+          if-no-files-found: warn
+          retention-days: 14
