@@ -10,6 +10,14 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Runner image (macos-26 is arm64, macos-26-intel is x86_64)
+        type: choice
+        default: macos-26
+        options:
+          - macos-26
+          - macos-26-intel
 
 concurrency:
   group: fork-macos-${{ github.ref }}
@@ -20,8 +28,8 @@ permissions:
 
 jobs:
   macos:
-    name: Build & Test macOS
-    runs-on: macos-26
+    name: Build & Test macOS (${{ inputs.runner || 'macos-26' }})
+    runs-on: ${{ inputs.runner || 'macos-26' }}
     timeout-minutes: 180
     env:
       ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache
