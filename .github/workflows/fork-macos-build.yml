@@ -3,12 +3,14 @@ name: Fork macOS Build
 # Fork-only workflow. Upstream's release/test workflows require Namespace
 # runners, Nix, Cachix and a pile of release secrets (Developer ID cert,
 # notarization, Sparkle, R2) that do not exist in this fork, so we only reuse
-# their build steps: zig build for GhosttyKit, then xcodebuild for the app.
+# their build steps: zig build for GhosttyKit, then xcodebuild for the app,
+# then an ad-hoc signature, the same approach pihalf/ghostty2 uses.
 # Delete this file if you no longer need it; it is not part of upstream.
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -19,6 +21,10 @@ on:
         options:
           - macos-26
           - macos-26-intel
+      universal:
+        description: Build a universal (arm64 + x86_64) app instead of native only
+        type: boolean
+        default: false
       tests:
         description: Also run the Swift unit tests (slow, can exhaust the runner)
         type: boolean
@@ -26,7 +32,7 @@ on:
 
 concurrency:
   group: fork-macos-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -68,32 +74,72 @@ jobs:
           restore-keys: |
             zig-${{ runner.os }}-${{ runner.arch }}-0.17.0-
 
+      - name: Determine version and target
+        id: meta
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "universal=true" >> "$GITHUB_OUTPUT"
+            echo "artifact=Ghostty-macos-universal.zip" >> "$GITHUB_OUTPUT"
+          else
+            VERSION="1.4.1-dev+${GITHUB_SHA:0:7}"
+            echo "universal=${{ inputs.universal || 'false' }}" >> "$GITHUB_OUTPUT"
+            echo "artifact=Ghostty-macos-${{ runner.arch }}.zip" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}"
+
       # Builds GhosttyKit.xcframework (Zig) and then Ghostty.app via xcodebuild
       # in the ReleaseLocal configuration, which ad-hoc signs with "-" so no
       # developer team is needed.
       - name: Build Ghostty.app
-        run: zig build -Doptimize=ReleaseFast -Dxcframework-target=native
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.meta.outputs.universal }}" = "true" ]; then
+            TARGET=universal
+          else
+            TARGET=native
+          fi
+          zig build -Doptimize=ReleaseFast \
+            -Dxcframework-target="${TARGET}" \
+            -Dversion-string="${{ steps.meta.outputs.version }}"
 
-      # Package before doing anything else: a previous run lost the runner
-      # during the test step and we had no artifact to show for an hour of
-      # building.
-      - name: Package Ghostty.app
+      # Re-sign the bundle explicitly with the ReleaseLocal entitlements and
+      # stamp the version, so the About window and crash logs identify this
+      # build. Packaging happens before the test step because a previous run
+      # lost the runner during tests and the app was never uploaded.
+      - name: Finalize and package Ghostty.app
         run: |
           set -euo pipefail
           APP=macos/build/ReleaseLocal/Ghostty.app
+          PLIST="${APP}/Contents/Info.plist"
           if [ ! -d "${APP}" ]; then
             echo "::error::Ghostty.app was not produced"
             ls -R macos/build 2>/dev/null | head -50 || true
             exit 1
           fi
-          ditto -c -k --sequesterRsrc --keepParent "${APP}" Ghostty.app.zip
-          ls -lh Ghostty.app.zip
+
+          /usr/libexec/PlistBuddy -c "Set :GhosttyCommit ${GITHUB_SHA:0:7}" "${PLIST}" || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "${PLIST}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.meta.outputs.version }}" "${PLIST}"
+
+          /usr/bin/codesign --force --sign - \
+            --entitlements macos/GhosttyReleaseLocal.entitlements \
+            "${APP}"
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "${APP}"
+          plutil -lint "${PLIST}"
+
+          lipo -archs "${APP}/Contents/MacOS/ghostty" | tee /tmp/archs
+          ditto -c -k --sequesterRsrc --keepParent "${APP}" "${{ steps.meta.outputs.artifact }}"
+          ls -lh "${{ steps.meta.outputs.artifact }}"
 
       - name: Upload Ghostty.app
         uses: actions/upload-artifact@v4
         with:
-          name: Ghostty-${{ runner.arch }}-${{ github.sha }}
-          path: Ghostty.app.zip
+          name: Ghostty-macos-${{ github.sha }}
+          path: ${{ steps.meta.outputs.artifact }}
+          if-no-files-found: error
           retention-days: 14
 
       # Opt-in because a full Debug rebuild for tests can exhaust the hosted
@@ -107,3 +153,27 @@ jobs:
             -skip-testing GhosttyUITests \
             -jobs 2 \
             -parallel-testing-enabled NO
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download the app
+        uses: actions/download-artifact@v4
+        with:
+          name: Ghostty-macos-${{ github.sha }}
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" ./*.zip \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --title "Ghostty ${GITHUB_REF_NAME} (quick terminal tabs)" \
+            --notes "Built from ${GITHUB_SHA} on top of ghostty-org/ghostty main plus ghostty-org/ghostty#9857 (quick terminal tabs). The app is ad-hoc signed: on first launch use right click > Open, or run \`xattr -d com.apple.quarantine /Applications/Ghostty.app\`."
