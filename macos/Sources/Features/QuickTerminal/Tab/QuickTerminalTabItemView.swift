@@ -71,6 +71,7 @@ struct QuickTerminalTabItemView: View {
     var body: some View {
         HStack(spacing: Constants.horizontalSpacing) {
             renderCloseButton()
+            renderActivity()
             renderTitle()
             renderColorIndicator()
             if let shortcut = shortcut {
@@ -123,6 +124,54 @@ struct QuickTerminalTabItemView: View {
         .animation(.easeInOut, value: isHovering)
     }
 
+    /// The indicator that tells you a tab is still working (or needs you) while
+    /// you're reading another one. It sits next to the title so it's the first
+    /// thing the eye finds when scanning the bar.
+    @ViewBuilder private func renderActivity() -> some View {
+        if let activity = tab.activity {
+            Group {
+                switch activity.kind {
+                case .working:
+                    QuickTerminalTabProgressView(
+                        progress: activity.percent,
+                        color: isHighlighted ? primaryForeground : secondaryForeground
+                    )
+                case .blocked:
+                    // A blocked program is not progressing, so it must not
+                    // look like one: no spin, and a color that says "look at
+                    // me" instead of the tab's own foreground.
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: Constants.blockedIconSize))
+                        .foregroundColor(.orange)
+                }
+            }
+            .help(Self.help(for: activity))
+            .accessibilityLabel(Self.help(for: activity))
+            .transition(.opacity)
+        }
+    }
+
+    /// The tooltip for an activity indicator. The program's own description is
+    /// untrusted text, so it is only ever appended as a label.
+    private static func help(for activity: QuickTerminalTab.Activity) -> String {
+        switch activity.kind {
+        case .working:
+            let verb = activity.message.isEmpty ? "Running" : activity.message
+            guard let percent = activity.percent else { return verb }
+            return "\(verb) - \(percent)% complete"
+
+        case .blocked:
+            let reason: String
+            switch activity.blockReason {
+            case .permission: reason = "Waiting for your permission"
+            case .question: reason = "Waiting for your answer"
+            case .auth: reason = "Waiting for a credential"
+            case .none: reason = "Waiting for you"
+            }
+            return activity.message.isEmpty ? reason : "\(reason): \(activity.message)"
+        }
+    }
+
     @ViewBuilder private func renderColorIndicator() -> some View {
         if let color = tab.tabColor.displayColor {
             Circle()
@@ -158,6 +207,7 @@ extension QuickTerminalTabItemView {
         static let closeButtonFontSize: CGFloat = 10
         static let shortcutFontSize: CGFloat = 11
         static let colorIndicatorSize: CGFloat = 6
+        static let blockedIconSize: CGFloat = 10
         static let titleLineLimit: Int = 1
     }
 }

@@ -32,6 +32,12 @@ extension Ghostty {
         // The progress report (if any)
         @Published var progressReport: Action.ProgressReport?
 
+        /// What the program behind this surface says it is doing, when it
+        /// speaks the OSC 7501 program status protocol. This is richer than
+        /// `progressReport`: it can also say that the program is blocked on the
+        /// user.
+        @Published var programStatus: Action.ProgramStatus?
+
         // The currently active key tables. Empty if no tables are active.
         @Published var keyTables: [String] = []
 
