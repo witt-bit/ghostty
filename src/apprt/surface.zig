@@ -140,6 +140,11 @@ pub const Message = union(enum) {
     /// Report the progress of an action using a GUI element
     progress_report: terminal.osc.Command.ProgressReport,
 
+    /// A program reported what it is doing using the OSC 7501 program status
+    /// protocol. This is how a program says "still working" or "blocked on
+    /// you" without the apprt having to guess from output activity.
+    program_status: ProgramStatus,
+
     /// A command has started in the shell, start a timer.
     start_command,
 
@@ -164,6 +169,21 @@ pub const Message = union(enum) {
         csi_21_t,
 
         // This enum is a placeholder for future title styles.
+    };
+
+    /// What a program reported with the OSC 7501 program status protocol.
+    ///
+    /// The text is owned: it is copied out of the VT parser's buffer because
+    /// the surface handles messages on the app thread, long after the parser
+    /// moved on.
+    pub const ProgramStatus = struct {
+        state: terminal.osc.Command.ProgramStatus.State,
+        /// Only meaningful when the state is `blocked`.
+        kind: ?terminal.osc.Command.ProgramStatus.Kind,
+        /// Percent complete, if the program reported one.
+        progress: ?u8,
+        /// One line of text for people, empty if the program didn't send one.
+        msg: WriteReq,
     };
 
     pub const ChildExited = extern struct {

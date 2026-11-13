@@ -356,6 +356,7 @@ pub const StreamHandler = struct {
             .report_pwd => try self.reportPwd(value.url),
             .show_desktop_notification => try self.showDesktopNotification(value.title, value.body),
             .progress_report => self.progressReport(value),
+            .program_status => self.programStatus(value),
             .start_hyperlink => try self.startHyperlink(value.uri, value.id),
             .clipboard_contents => try self.clipboardContents(value.kind, value.data),
             .semantic_prompt => try self.semanticPrompt(value),
@@ -385,7 +386,6 @@ pub const StreamHandler = struct {
             .title_pop,
             .kitty_dnd,
             .osc_unknown,
-            .program_status,
             => {},
         }
     }
@@ -1951,6 +1951,45 @@ pub const StreamHandler = struct {
     /// Display a GUI progress report.
     fn progressReport(self: *StreamHandler, report: terminal.osc.Command.ProgressReport) void {
         self.surfaceMessageWriter(.{ .progress_report = report });
+    }
+
+    /// Handle an OSC 7501 program status sequence: either a program asking
+    /// whether we speak the protocol, or a report of what it is doing.
+    fn programStatus(self: *StreamHandler, cmd: terminal.osc.Command.ProgramStatus) void {
+        switch (cmd) {
+            // Programs usually ask before they start reporting; one that gets
+            // no reply stays quiet. The reply is fixed bytes, because the spec
+            // never allows a terminal to send report contents back.
+            .query => |terminator| switch (terminator) {
+                inline else => |t| self.messageWriter(.{
+                    .write_stable = "\x1b]7501;" ++
+                        terminal.osc.program_status.query_reply ++
+                        comptime t.string(),
+                }),
+            },
+
+            .report => |report| {
+                // `msg` is base64 on the wire and points into the parser's
+                // buffer, which the next sequence reuses, so copy it into the
+                // message. WriteReq keeps short text inline and allocates the
+                // rest; the surface frees it after handing it to the apprt.
+                var buf: [terminal.osc.program_status.max_msg_bytes]u8 = undefined;
+                var writer: std.Io.Writer = .fixed(&buf);
+                report.writeText(.msg, &writer) catch {};
+
+                const msg = apprt.surface.Message.WriteReq.init(self.alloc, writer.buffered()) catch |err| {
+                    log.warn("error copying program status msg err={}", .{err});
+                    return;
+                };
+
+                self.surfaceMessageWriter(.{ .program_status = .{
+                    .state = report.state,
+                    .kind = report.readOption(.kind),
+                    .progress = report.readOption(.progress),
+                    .msg = msg,
+                } });
+            },
+        }
     }
 };
 
