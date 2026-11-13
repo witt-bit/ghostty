@@ -172,11 +172,10 @@ extension Ghostty.Action {
             self.kind = Kind(c.kind)
             self.progress = c.progress >= 0 ? UInt8(c.progress) : nil
 
-            if let msg = c.msg {
-                self.message = String(cString: msg)
-            } else {
-                self.message = ""
-            }
+            // `ghostty.h` sits inside `#pragma clang assume_nonnull`, so the
+            // text is a non-optional pointer. The core always passes a valid,
+            // already NUL terminated string, empty when the program sent none.
+            self.message = String(cString: c.msg)
         }
     }
 
