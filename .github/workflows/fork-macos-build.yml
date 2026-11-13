@@ -105,6 +105,20 @@ jobs:
             -Dxcframework-target="${TARGET}" \
             -Dversion-string="${{ steps.meta.outputs.version }}"
 
+      # `zig build` captures the output of the steps it runs and prints only
+      # their tail when they fail, so a Swift compile error is reduced to
+      # "SwiftCompile ... failed" with the diagnostics missing. Rerun the same
+      # xcodebuild ourselves: by now the xcframework and resources it needs are
+      # already in the tree, so this reaches the compiler and prints the errors.
+      - name: Show compiler errors
+        if: failure()
+        run: |
+          set -uo pipefail
+          cd macos
+          xcodebuild -target Ghostty -configuration ReleaseLocal -arch "$(uname -m)" 2>&1 \
+            | grep -E "(\.swift:[0-9]+:[0-9]+: |error: |BUILD FAILED)" \
+            | head -120 || true
+
       # Re-sign the bundle explicitly with the ReleaseLocal entitlements and
       # stamp the version, so the About window and crash logs identify this
       # build. Packaging happens before the test step because a previous run
