@@ -364,6 +364,12 @@ pub const Action = union(Key) {
     /// split or the window is fullscreen.
     resize_window: ResizeWindow,
 
+    /// A program reported what it is doing using the OSC 7501 program status
+    /// protocol. Unlike `progress_report`, which only says "busy", this can
+    /// also say that the program is blocked on the user, so an apprt can tell
+    /// "still working" apart from "waiting for you".
+    program_status: ProgramStatus,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -436,6 +442,7 @@ pub const Action = union(Key) {
         copy_title_to_clipboard,
         move_tab_to_new_window,
         resize_window,
+        program_status,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
@@ -1022,6 +1029,76 @@ pub const CommandFinished = struct {
         return .{
             .exit_code = self.exit_code orelse -1,
             .duration = self.duration.duration,
+        };
+    }
+};
+
+/// What a program reported with the OSC 7501 program status protocol.
+///
+/// This is the apprt-facing value: the enums are mirrored so the C ABI does
+/// not depend on how the terminal side happens to represent them.
+pub const ProgramStatus = struct {
+    state: State,
+    /// Only meaningful when the state is `blocked`; `none` otherwise.
+    kind: Kind,
+    /// Percent complete, if the program reported one.
+    progress: ?u8,
+    /// One line of text for people, empty if the program didn't send one.
+    msg: [:0]const u8,
+
+    /// Sync with: ghostty_action_program_status_state_e
+    pub const State = enum(c_int) {
+        /// At rest, waiting for the user's next instruction.
+        idle,
+
+        /// Running. May carry a progress percentage.
+        working,
+
+        /// Finished a piece of work the user hasn't looked at yet.
+        done,
+
+        /// Can't continue until the user does something. `kind` says what.
+        blocked,
+
+        /// Failed and stopped.
+        @"error",
+
+        /// Not a state: the program is gone, forget everything it reported.
+        clear,
+    };
+
+    /// Sync with: ghostty_action_program_status_kind_e
+    pub const Kind = enum(c_int) {
+        none,
+
+        /// Needs approval to do something.
+        permission,
+
+        /// Needs an answer the user has to type.
+        question,
+
+        /// Needs a login, token, or other credential.
+        auth,
+    };
+
+    // Sync with: ghostty_action_program_status_s
+    pub const C = extern struct {
+        state: State,
+        kind: Kind,
+        progress: i8,
+        msg: [*:0]const u8,
+    };
+
+    pub fn cval(self: ProgramStatus) C {
+        return .{
+            .state = self.state,
+            .kind = self.kind,
+            .progress = if (self.progress) |progress| @intCast(std.math.clamp(
+                progress,
+                0,
+                100,
+            )) else -1,
+            .msg = self.msg.ptr,
         };
     }
 };
