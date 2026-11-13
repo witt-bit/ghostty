@@ -83,7 +83,7 @@ jobs:
             echo "universal=true" >> "$GITHUB_OUTPUT"
             echo "artifact=Ghostty-macos-universal.zip" >> "$GITHUB_OUTPUT"
           else
-            VERSION="1.4.1-dev+${GITHUB_SHA:0:7}"
+            VERSION="1.4.1-qt.2-dev+${GITHUB_SHA:0:7}"
             echo "universal=${{ inputs.universal || 'false' }}" >> "$GITHUB_OUTPUT"
             echo "artifact=Ghostty-macos-${{ runner.arch }}.zip" >> "$GITHUB_OUTPUT"
           fi
