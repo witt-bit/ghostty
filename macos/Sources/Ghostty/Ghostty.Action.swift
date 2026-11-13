@@ -105,6 +105,81 @@ extension Ghostty.Action {
         let progress: UInt8?
     }
 
+    /// What a program is doing, as reported by the OSC 7501 program status
+    /// protocol. Unlike `ProgressReport`, which only says "busy", this can say
+    /// that the program is blocked on the user.
+    struct ProgramStatus {
+        enum State {
+            case idle
+            case working
+            case done
+            case blocked
+            case error
+            case clear
+
+            init(_ c: ghostty_action_program_status_state_e) {
+                switch c {
+                case GHOSTTY_PROGRAM_STATUS_STATE_IDLE:
+                    self = .idle
+                case GHOSTTY_PROGRAM_STATUS_STATE_WORKING:
+                    self = .working
+                case GHOSTTY_PROGRAM_STATUS_STATE_DONE:
+                    self = .done
+                case GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED:
+                    self = .blocked
+                case GHOSTTY_PROGRAM_STATUS_STATE_ERROR:
+                    self = .error
+                case GHOSTTY_PROGRAM_STATUS_STATE_CLEAR:
+                    self = .clear
+                default:
+                    self = .clear
+                }
+            }
+        }
+
+        /// What a blocked program is waiting for. Only meaningful when the
+        /// state is `.blocked`.
+        enum Kind {
+            case permission
+            case question
+            case auth
+
+            init?(_ c: ghostty_action_program_status_kind_e) {
+                switch c {
+                case GHOSTTY_PROGRAM_STATUS_KIND_PERMISSION:
+                    self = .permission
+                case GHOSTTY_PROGRAM_STATUS_KIND_QUESTION:
+                    self = .question
+                case GHOSTTY_PROGRAM_STATUS_KIND_AUTH:
+                    self = .auth
+                default:
+                    return nil
+                }
+            }
+        }
+
+        let state: State
+        let kind: Kind?
+        let progress: UInt8?
+
+        /// One line of text from the program, e.g. what it needs approval for.
+        /// It is untrusted text from the program, so it is only ever used as a
+        /// label and never interpreted.
+        let message: String
+
+        init(c: ghostty_action_program_status_s) {
+            self.state = State(c.state)
+            self.kind = Kind(c.kind)
+            self.progress = c.progress >= 0 ? UInt8(c.progress) : nil
+
+            if let msg = c.msg {
+                self.message = String(cString: msg)
+            } else {
+                self.message = ""
+            }
+        }
+    }
+
     struct Scrollbar {
         let total: UInt64
         let offset: UInt64

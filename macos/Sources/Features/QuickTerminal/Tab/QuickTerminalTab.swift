@@ -14,6 +14,77 @@ class QuickTerminalTab: ObservableObject, Identifiable {
     /// `bell-features` config — this property just reflects raw surface state.
     @Published private(set) var surfaceBell: Bool = false
 
+    /// The focused surface's `OSC 9;4` progress report, if any. Programs use it
+    /// to say "I'm still working", which is what lets a tab keep showing a
+    /// spinner while you look at a different tab.
+    @Published private(set) var surfaceProgress: Ghostty.Action.ProgressReport?
+
+    /// Whether a command in the focused surface is still running. A report of
+    /// `error` is not busy: the program failed and stopped. `pause` is: the
+    /// operation is done but hasn't been dismissed yet.
+    var isBusy: Bool {
+        switch surfaceProgress?.state {
+        case .set, .indeterminate, .pause: return true
+        case .remove, .error, .none: return false
+        }
+    }
+
+    /// The focused surface's `OSC 7501` program status, if any. This is the
+    /// richer signal of the two: it can also say that the program is blocked on
+    /// the user, so a tab can tell "still working" apart from "needs me".
+    @Published private(set) var surfaceProgramStatus: Ghostty.Action.ProgramStatus?
+
+    /// What the tab should show for the program behind it.
+    struct Activity {
+        enum Kind {
+            /// Running.
+            case working
+            /// Can't continue until the user does something.
+            case blocked
+        }
+
+        let kind: Kind
+        /// What a blocked program needs, when the program said.
+        let blockReason: Ghostty.Action.ProgramStatus.Kind?
+        /// Percent complete, when the program reported one.
+        let percent: UInt8?
+        /// One line from the program describing what it is doing, if any.
+        let message: String
+    }
+
+    /// The activity indicator for the tab, or nil when nothing is running.
+    ///
+    /// `OSC 7501` wins over `OSC 9;4` because it knows about blocked programs;
+    /// a program that only speaks `OSC 9;4` (cargo, ninja, ...) still gets a
+    /// spinner out of its progress report. `done` and `error` are not activity:
+    /// the program stopped, and the indicator's whole job is to say "still
+    /// running".
+    var activity: Activity? {
+        if let status = surfaceProgramStatus {
+            switch status.state {
+            case .working:
+                return Activity(
+                    kind: .working,
+                    blockReason: nil,
+                    percent: status.progress,
+                    message: status.message
+                )
+            case .blocked:
+                return Activity(
+                    kind: .blocked,
+                    blockReason: status.kind,
+                    percent: status.progress,
+                    message: status.message
+                )
+            case .idle, .done, .error, .clear:
+                return nil
+            }
+        }
+
+        guard isBusy else { return nil }
+        return Activity(kind: .working, blockReason: nil, percent: surfaceProgress?.progress, message: "")
+    }
+
     /// The tab color for visual identification
     @Published var tabColor: TerminalTabColor = .none
 
@@ -53,6 +124,8 @@ class QuickTerminalTab: ObservableObject, Identifiable {
             backgroundColor = nil
             backgroundOpacity = 1
             surfaceBell = false
+            surfaceProgress = nil
+            surfaceProgramStatus = nil
             return
         }
 
@@ -65,6 +138,25 @@ class QuickTerminalTab: ObservableObject, Identifiable {
                 guard let self else { return }
                 self.surfaceTitle = title
                 self.surfaceBell = bell
+            }
+            .store(in: &cancellables)
+
+        // Progress reports (OSC 9;4) arrive as a whole new value per report and
+        // are cleared by the program when it's done, so there is nothing to
+        // merge here: whatever the surface last reported is the current state.
+        surface.$progressReport
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] report in
+                self?.surfaceProgress = report
+            }
+            .store(in: &cancellables)
+
+        // Program status (OSC 7501) is the same shape: one value per report,
+        // cleared by the program (or by the shell's command-finished mark).
+        surface.$programStatus
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.surfaceProgramStatus = status
             }
             .store(in: &cancellables)
 

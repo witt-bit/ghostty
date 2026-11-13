@@ -708,6 +708,9 @@ extension Ghostty {
             case GHOSTTY_ACTION_PROGRESS_REPORT:
                 progressReport(app, target: target, v: action.action.progress_report)
 
+            case GHOSTTY_ACTION_PROGRAM_STATUS:
+                programStatus(app, target: target, v: action.action.program_status)
+
             case GHOSTTY_ACTION_CONFIG_CHANGE:
                 configChange(app, target: target, v: action.action.config_change)
 
@@ -1645,6 +1648,13 @@ extension Ghostty {
                 guard let surface = target.target.surface else { return }
                 guard let surfaceView = self.surfaceView(from: surface) else { return }
 
+                // The command that reported a program status (OSC 7501) is over,
+                // and a program that is killed never gets to clear its report,
+                // so drop it here rather than leaving a spinner in the tab bar
+                // forever. This runs before the notification config is checked
+                // so it happens even when notifications are off.
+                surfaceView.programStatus = nil
+
                 // Determine if we even care about command finish notifications
                 guard let config = (NSApplication.shared.delegate as? AppDelegate)?.ghostty.config else { return }
                 switch config.notifyOnCommandFinish {
@@ -2254,6 +2264,45 @@ extension Ghostty {
                         surfaceView.progressReport = nil
                     } else {
                         surfaceView.progressReport = progressReport
+                    }
+                }
+
+            default:
+                assertionFailure()
+            }
+        }
+
+        private static func programStatus(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s,
+            v: ghostty_action_program_status_s) {
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                Ghostty.logger.warning("program status does nothing with an app target")
+                return
+
+            case GHOSTTY_TARGET_SURFACE:
+                guard let surface = target.target.surface else { return }
+                guard let surfaceView = self.surfaceView(from: surface) else { return }
+                guard let config = (NSApplication.shared.delegate as? AppDelegate)?.ghostty.config else { return }
+
+                // `progress-style` is the one switch for program-driven
+                // indicators: a user who turned it off doesn't want a bar in
+                // the terminal or a spinner in the tab bar.
+                guard config.progressStyle else {
+                    Ghostty.logger.debug("program_status action blocked by config")
+                    DispatchQueue.main.async {
+                        surfaceView.programStatus = nil
+                    }
+                    return
+                }
+
+                let programStatus = Ghostty.Action.ProgramStatus(c: v)
+                DispatchQueue.main.async {
+                    if programStatus.state == .clear {
+                        surfaceView.programStatus = nil
+                    } else {
+                        surfaceView.programStatus = programStatus
                     }
                 }
 
