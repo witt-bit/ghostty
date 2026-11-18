@@ -40,6 +40,12 @@ exe_entrypoint: ExeEntrypoint = .ghostty,
 version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
 lib_version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
 
+/// The bundle ID for the app. It decides the macOS Application Support
+/// directory, the user defaults domain and the TCC identity, so a build
+/// with a different bundle ID runs fully side by side with the stock app:
+/// own config file, own window state, own permissions, own global keybinds.
+bundle_id: [:0]const u8 = "com.mitchellh.ghostty",
+
 /// The absolute path the Ghostty executable is installed at, for the Linux
 /// desktop, D-Bus and systemd files that launch it. Null means they name
 /// the executable alone.
@@ -274,6 +280,16 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
         .linux, .freebsd => target.result.isGnuLibC(),
         else => false,
     };
+
+    // A different bundle ID gives the build its own configuration directory,
+    // defaults domain and TCC identity, which is how two variants can coexist.
+    if (b.option(
+        []const u8,
+        "bundle-id",
+        "The bundle ID for the app, e.g. dev.example.ghostty. Defaults to com.mitchellh.ghostty.",
+    )) |v| {
+        config.bundle_id = try b.allocator.dupeSentinel(u8, v, 0);
+    }
 
     //---------------------------------------------------------------
     // Ghostty Exe Properties
@@ -698,6 +714,7 @@ pub fn addOptions(self: *const Config, step: *std.Build.Step.Options) !void {
     step.addOption(ExeEntrypoint, "exe_entrypoint", self.exe_entrypoint);
     step.addOption(WasmTarget, "wasm_target", self.wasm_target);
     step.addOption(bool, "wasm_shared", self.wasm_shared);
+    step.addOption([:0]const u8, "bundle_id", self.bundle_id);
 
     // Our version. We also add the string version so we don't need
     // to do any allocations at runtime. This has to be long enough to

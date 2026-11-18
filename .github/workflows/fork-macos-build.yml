@@ -29,6 +29,13 @@ on:
         description: Also run the Swift unit tests (slow, can exhaust the runner)
         type: boolean
         default: false
+      bundle_id:
+        description: >-
+          Bundle ID for the app. Leave empty for com.mitchellh.ghostty. A
+          different value builds a fully separate variant (own config
+          directory, defaults domain, permissions) named GhosttyN.app.
+        type: string
+        default: ""
 
 concurrency:
   group: fork-macos-${{ github.ref }}
@@ -78,6 +85,19 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
+          # A build with a different bundle ID is a separate app: its own
+          # config directory and defaults domain, so it can be installed next
+          # to the stock one without the two fighting over keybinds.
+          BUNDLE_ID="${{ inputs.bundle_id }}"
+          if [ -z "${BUNDLE_ID}" ]; then
+            BUNDLE_ID="com.mitchellh.ghostty"
+            APP_NAME="Ghostty"
+          else
+            APP_NAME="GhosttyN"
+          fi
+          echo "bundle_id=${BUNDLE_ID}" >> "$GITHUB_OUTPUT"
+          echo "app_name=${APP_NAME}" >> "$GITHUB_OUTPUT"
+
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
             echo "universal=true" >> "$GITHUB_OUTPUT"
@@ -85,7 +105,7 @@ jobs:
           else
             VERSION="1.4.1-qt.2-dev+${GITHUB_SHA:0:7}"
             echo "universal=${{ inputs.universal || 'false' }}" >> "$GITHUB_OUTPUT"
-            echo "artifact=Ghostty-macos-${{ runner.arch }}.zip" >> "$GITHUB_OUTPUT"
+            echo "artifact=${APP_NAME}-macos-${{ runner.arch }}.zip" >> "$GITHUB_OUTPUT"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}"
@@ -103,7 +123,8 @@ jobs:
           fi
           zig build -Doptimize=ReleaseFast \
             -Dxcframework-target="${TARGET}" \
-            -Dversion-string="${{ steps.meta.outputs.version }}"
+            -Dversion-string="${{ steps.meta.outputs.version }}" \
+            -Dbundle-id="${{ steps.meta.outputs.bundle_id }}"
 
       # `zig build` captures the output of the steps it runs and prints only
       # their tail when they fail, so a Swift compile error is reduced to
@@ -162,17 +183,26 @@ jobs:
       - name: Finalize and package Ghostty.app
         run: |
           set -euo pipefail
-          APP=macos/build/ReleaseLocal/Ghostty.app
-          PLIST="${APP}/Contents/Info.plist"
-          if [ ! -d "${APP}" ]; then
+          BUILT=macos/build/ReleaseLocal/Ghostty.app
+          APP=macos/build/ReleaseLocal/${{ steps.meta.outputs.app_name }}.app
+          if [ ! -d "${BUILT}" ]; then
             echo "::error::Ghostty.app was not produced"
             ls -R macos/build 2>/dev/null | head -50 || true
             exit 1
           fi
+          # The bundle directory name is cosmetic; the executable inside stays
+          # "ghostty" because that is what CFBundleExecutable points at.
+          if [ "${BUILT}" != "${APP}" ]; then mv "${BUILT}" "${APP}"; fi
+          PLIST="${APP}/Contents/Info.plist"
 
           /usr/libexec/PlistBuddy -c "Set :GhosttyCommit ${GITHUB_SHA:0:7}" "${PLIST}" || true
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "${PLIST}"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.meta.outputs.version }}" "${PLIST}"
+          if [ "${{ steps.meta.outputs.bundle_id }}" != "com.mitchellh.ghostty" ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${{ steps.meta.outputs.bundle_id }}" "${PLIST}"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleName ${{ steps.meta.outputs.app_name }}" "${PLIST}"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${{ steps.meta.outputs.app_name }}" "${PLIST}"
+          fi
 
           SIGN="${SIGN_IDENTITY:--}"
           /usr/bin/codesign --force --sign "${SIGN}" \
