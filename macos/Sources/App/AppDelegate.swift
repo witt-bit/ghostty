@@ -1028,6 +1028,17 @@ class AppDelegate: NSObject,
     }
 
     @IBAction func newTab(_ sender: Any?) {
+        // The quick terminal keeps its own tabs and is a BaseTerminalController,
+        // not a TerminalController, so the fallback below would open a main
+        // window instead of a tab. When the quick terminal is the window in
+        // front, add the tab to it.
+        if quickControllerInitialized,
+           let window = quickController.window,
+           window.isKeyWindow || window.isMainWindow {
+            quickController.newTab(sender)
+            return
+        }
+
         _ = TerminalController.newTab(
             ghostty,
             from: TerminalController.preferredParent?.window

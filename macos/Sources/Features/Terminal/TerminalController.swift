@@ -421,6 +421,13 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
         from parent: NSWindow? = nil,
         withBaseConfig baseConfig: Ghostty.SurfaceConfiguration? = nil
     ) -> TerminalController? {
+        // A quick terminal has its own tab manager, so a tab requested from its
+        // window belongs there rather than in a new main window.
+        if let parent, let quick = parent.windowController as? QuickTerminalController {
+            quick.newTab(nil)
+            return nil
+        }
+
         // Making sure that we're dealing with a TerminalController. If not,
         // then we just create a new window.
         guard let parent,
