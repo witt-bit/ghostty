@@ -147,7 +147,12 @@ jobs:
             -P "$CERT_PASSWORD" -T /usr/bin/codesign -A
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$KEYCHAIN" > /dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-          security find-identity -v -p codesigning "$KEYCHAIN"
+          security find-identity -p codesigning "$KEYCHAIN"
+          if ! security find-identity -p codesigning "$KEYCHAIN" | grep -qF "${CERT_IDENTITY}"; then
+            echo "::error::identity \"${CERT_IDENTITY}\" not found in the imported keychain"
+            security find-identity -p codesigning "$KEYCHAIN"
+            exit 1
+          fi
           echo "SIGN_IDENTITY=${CERT_IDENTITY}" >> "$GITHUB_ENV"
 
       # Re-sign the bundle explicitly with the ReleaseLocal entitlements and
