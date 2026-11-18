@@ -119,6 +119,37 @@ jobs:
             | grep -E "(\.swift:[0-9]+:[0-9]+: |error: |BUILD FAILED)" \
             | head -120 || true
 
+      # A stable identity keeps macOS permissions granted across rebuilds:
+      # ad-hoc signatures change on every build, so TCC (accessibility for the
+      # global keybinds, automation prompts) forgets the app each time and the
+      # user has to re-approve it. The identity is a throwaway self-signed
+      # certificate stored in repository secrets, not tied to any account.
+      # Falls back to ad-hoc signing when the secrets are not configured.
+      - name: Import signing identity
+        env:
+          CERT_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_SIGNING_PASSWORD }}
+          CERT_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CERT_P12:-}" ]; then
+            echo "::warning::no signing certificate configured, falling back to ad-hoc"
+            echo "SIGN_IDENTITY=-" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          KEYCHAIN="${RUNNER_TEMP}/signing.keychain-db"
+          echo "$CERT_P12" | openssl base64 -d -A -out "${RUNNER_TEMP}/signing.p12"
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          security import "${RUNNER_TEMP}/signing.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign -A
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$KEYCHAIN"
+          echo "SIGN_IDENTITY=${CERT_IDENTITY}" >> "$GITHUB_ENV"
+
       # Re-sign the bundle explicitly with the ReleaseLocal entitlements and
       # stamp the version, so the About window and crash logs identify this
       # build. Packaging happens before the test step because a previous run
@@ -138,7 +169,8 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${GITHUB_RUN_NUMBER}" "${PLIST}"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.meta.outputs.version }}" "${PLIST}"
 
-          /usr/bin/codesign --force --sign - \
+          SIGN="${SIGN_IDENTITY:--}"
+          /usr/bin/codesign --force --sign "${SIGN}" \
             --entitlements macos/GhosttyReleaseLocal.entitlements \
             "${APP}"
           /usr/bin/codesign --verify --deep --strict --verbose=2 "${APP}"
