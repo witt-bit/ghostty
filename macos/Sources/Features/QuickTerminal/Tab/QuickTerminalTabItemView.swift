@@ -70,8 +70,7 @@ struct QuickTerminalTabItemView: View {
 
     var body: some View {
         HStack(spacing: Constants.horizontalSpacing) {
-            renderCloseButton()
-            renderActivity()
+            renderLeadingSlot()
             renderTitle()
             renderColorIndicator()
             if let shortcut = shortcut {
@@ -120,35 +119,45 @@ struct QuickTerminalTabItemView: View {
             self.isHoveringCloseButton = isHoveringCloseButton
         }
         .help("Click to close this tab; Option-click to close all tabs except this one")
-        .opacity(isHovering ? 1 : 0)
-        .animation(.easeInOut, value: isHovering)
     }
 
-    /// The indicator that tells you a tab is still working (or needs you) while
-    /// you're reading another one. It sits next to the title so it's the first
-    /// thing the eye finds when scanning the bar.
-    @ViewBuilder private func renderActivity() -> some View {
-        if let activity = tab.activity {
-            Group {
-                switch activity.kind {
-                case .working:
-                    QuickTerminalTabProgressView(
-                        progress: activity.percent,
-                        color: isHighlighted ? primaryForeground : secondaryForeground
-                    )
-                case .blocked:
-                    // A blocked program is not progressing, so it must not
-                    // look like one: no spin, and a color that says "look at
-                    // me" instead of the tab's own foreground.
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(.system(size: Constants.blockedIconSize))
-                        .foregroundColor(.orange)
-                }
+    /// The leading slot shows one thing at a time: the close button while the
+    /// cursor is over the tab, and the activity indicator otherwise. Sharing
+    /// the slot keeps the indicator away from the title, and the title never
+    /// shifts because the slot keeps its width either way.
+    @ViewBuilder private func renderLeadingSlot() -> some View {
+        ZStack {
+            if isHovering {
+                renderCloseButton()
+            } else if let activity = tab.activity {
+                renderActivityIndicator(activity)
             }
-            .help(Self.help(for: activity))
-            .accessibilityLabel(Self.help(for: activity))
-            .transition(.opacity)
         }
+        .frame(width: Constants.leadingSlotSize, height: Constants.leadingSlotSize)
+        .animation(.easeInOut(duration: 0.12), value: isHovering)
+    }
+
+    /// The indicator that tells you a tab is still working (or needs you)
+    /// while you're reading another one.
+    @ViewBuilder private func renderActivityIndicator(_ activity: QuickTerminalTab.Activity) -> some View {
+        Group {
+            switch activity.kind {
+            case .working:
+                QuickTerminalTabProgressView(
+                    progress: activity.percent,
+                    color: isHighlighted ? primaryForeground : secondaryForeground
+                )
+            case .blocked:
+                // A blocked program is not progressing, so it must not look
+                // like one: no spin, and a color that says "look at me"
+                // instead of the tab's own foreground.
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: Constants.blockedIconSize))
+                    .foregroundColor(.orange)
+            }
+        }
+        .help(Self.help(for: activity))
+        .accessibilityLabel(Self.help(for: activity))
     }
 
     /// The tooltip for an activity indicator. The program's own description is
@@ -207,6 +216,9 @@ extension QuickTerminalTabItemView {
         static let closeButtonFontSize: CGFloat = 10
         static let shortcutFontSize: CGFloat = 11
         static let colorIndicatorSize: CGFloat = 6
+        /// Wide enough for the close button (10pt glyph + 2pt padding each
+        /// side) so swapping in the 10pt indicator does not move the title.
+        static let leadingSlotSize: CGFloat = 14
         static let blockedIconSize: CGFloat = 10
         static let titleLineLimit: Int = 1
     }
