@@ -29,13 +29,6 @@ on:
         description: Also run the Swift unit tests (slow, can exhaust the runner)
         type: boolean
         default: false
-      bundle_id:
-        description: >-
-          Bundle ID for the app. Leave empty for com.mitchellh.ghostty. A
-          different value builds a fully separate variant (own config
-          directory, defaults domain, permissions) named GhosttyN.app.
-        type: string
-        default: ""
 
 concurrency:
   group: fork-macos-${{ github.ref }}
@@ -46,9 +39,27 @@ permissions:
 
 jobs:
   macos:
-    name: Build macOS (${{ inputs.runner || 'macos-26' }})
+    name: Build macOS ${{ matrix.app_name }} (${{ inputs.runner || 'macos-26' }})
     runs-on: ${{ inputs.runner || 'macos-26' }}
     timeout-minutes: 180
+    # Two packages per run, built in parallel:
+    #
+    #   Ghostty   the stock app, what you install over the existing one
+    #   GhosttyN  the same code under a different bundle ID, so it has its own
+    #             config directory, user defaults domain, TCC identity and
+    #             global keybinds, and can be installed next to the stock app
+    #             for trying changes without touching the daily driver.
+    #
+    # Release runs only publish the stock artifact (see the release job), but
+    # build both so a tag can also be used for a side-by-side test.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app_name: Ghostty
+            bundle_id: com.mitchellh.ghostty
+          - app_name: GhosttyN
+            bundle_id: dev.witt.ghosttyn
     env:
       ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
@@ -85,23 +96,15 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
-          # A build with a different bundle ID is a separate app: its own
-          # config directory and defaults domain, so it can be installed next
-          # to the stock one without the two fighting over keybinds.
-          BUNDLE_ID="${{ inputs.bundle_id }}"
-          if [ -z "${BUNDLE_ID}" ]; then
-            BUNDLE_ID="com.mitchellh.ghostty"
-            APP_NAME="Ghostty"
-          else
-            APP_NAME="GhosttyN"
-          fi
+          BUNDLE_ID="${{ matrix.bundle_id }}"
+          APP_NAME="${{ matrix.app_name }}"
           echo "bundle_id=${BUNDLE_ID}" >> "$GITHUB_OUTPUT"
           echo "app_name=${APP_NAME}" >> "$GITHUB_OUTPUT"
 
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
             echo "universal=true" >> "$GITHUB_OUTPUT"
-            echo "artifact=Ghostty-macos-universal.zip" >> "$GITHUB_OUTPUT"
+            echo "artifact=${APP_NAME}-macos-universal.zip" >> "$GITHUB_OUTPUT"
           else
             VERSION="1.4.1-qt.2-dev+${GITHUB_SHA:0:7}"
             echo "universal=${{ inputs.universal || 'false' }}" >> "$GITHUB_OUTPUT"
@@ -218,7 +221,7 @@ jobs:
       - name: Upload Ghostty.app
         uses: actions/upload-artifact@v4
         with:
-          name: Ghostty-macos-${{ github.sha }}
+          name: ${{ matrix.app_name }}-macos-${{ github.sha }}
           path: ${{ steps.meta.outputs.artifact }}
           if-no-files-found: error
           retention-days: 14
@@ -270,5 +273,5 @@ jobs:
               --verify-tag \
               --latest \
               --title "Ghostty ${GITHUB_REF_NAME} (quick terminal tabs)" \
-              --notes "Built from ${GITHUB_SHA} on top of ghostty-org/ghostty main plus ghostty-org/ghostty#9857 (quick terminal tabs). The app is ad-hoc signed: on first launch use right click > Open, or run \`xattr -d com.apple.quarantine /Applications/Ghostty.app\`."
+              --notes "Built from ${GITHUB_SHA} on top of ghostty-org/ghostty main plus ghostty-org/ghostty#9857 (quick terminal tabs). The app is self-signed, not notarized: on first launch use right click > Open, or run \`xattr -d com.apple.quarantine /Applications/Ghostty.app\`."
           fi
