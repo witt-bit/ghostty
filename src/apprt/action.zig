@@ -374,7 +374,7 @@ pub const Action = union(Key) {
     /// level signal: a program that reports its own status (OSC 7501) is more
     /// precise, but most commands say nothing at all, and a tab spinner that
     /// only reacts to cooperative programs is useless for `brew upgrade`.
-    command_busy: bool,
+    command_busy: CommandBusy,
 
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
@@ -683,6 +683,20 @@ pub const QuitTimer = enum(c_int) {
 
     test "ghostty.h QuitTimer" {
         try lib.checkGhosttyHEnum(QuitTimer, "GHOSTTY_QUIT_TIMER_");
+    }
+};
+
+/// Whether a command is running in the surface. A boolean in spirit, but an
+/// action's value type cannot be `bool`: the C value union probes each type
+/// for a `C` declaration, and `@hasDecl` only accepts a struct, enum, union
+/// or opaque type. Every other flag-ish action (see `Readonly`) is an
+/// `enum(c_int)` for the same reason.
+pub const CommandBusy = enum(c_int) {
+    idle,
+    busy,
+
+    test "ghostty.h CommandBusy" {
+        try lib.checkGhosttyHEnum(CommandBusy, "GHOSTTY_COMMAND_BUSY_");
     }
 };
 

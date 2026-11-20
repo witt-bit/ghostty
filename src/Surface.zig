@@ -1190,7 +1190,7 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
             _ = self.rt_app.performAction(
                 .{ .surface = self },
                 .command_busy,
-                busy,
+                if (busy) .busy else .idle,
             ) catch |err| {
                 log.warn("apprt failed to report command busy err={}", .{err});
             };

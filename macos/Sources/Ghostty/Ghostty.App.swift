@@ -2317,7 +2317,7 @@ extension Ghostty {
         private static func commandBusy(
             _ app: ghostty_app_t,
             target: ghostty_target_s,
-            v: Bool) {
+            v: ghostty_command_busy_e) {
             switch target.tag {
             case GHOSTTY_TARGET_APP:
                 Ghostty.logger.warning("command busy does nothing with an app target")
@@ -2326,8 +2326,9 @@ extension Ghostty {
             case GHOSTTY_TARGET_SURFACE:
                 guard let surface = target.target.surface else { return }
                 guard let surfaceView = self.surfaceView(from: surface) else { return }
+                let busy = v != GHOSTTY_COMMAND_BUSY_IDLE
                 DispatchQueue.main.async {
-                    surfaceView.commandBusy = v
+                    surfaceView.commandBusy = busy
                 }
 
             default:
