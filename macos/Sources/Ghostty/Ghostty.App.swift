@@ -711,6 +711,9 @@ extension Ghostty {
             case GHOSTTY_ACTION_PROGRAM_STATUS:
                 programStatus(app, target: target, v: action.action.program_status)
 
+            case GHOSTTY_ACTION_COMMAND_BUSY:
+                commandBusy(app, target: target, v: action.action.command_busy)
+
             case GHOSTTY_ACTION_CONFIG_CHANGE:
                 configChange(app, target: target, v: action.action.config_change)
 
@@ -2304,6 +2307,27 @@ extension Ghostty {
                     } else {
                         surfaceView.programStatus = programStatus
                     }
+                }
+
+            default:
+                assertionFailure()
+            }
+        }
+
+        private static func commandBusy(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s,
+            v: Bool) {
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                Ghostty.logger.warning("command busy does nothing with an app target")
+                return
+
+            case GHOSTTY_TARGET_SURFACE:
+                guard let surface = target.target.surface else { return }
+                guard let surfaceView = self.surfaceView(from: surface) else { return }
+                DispatchQueue.main.async {
+                    surfaceView.commandBusy = v
                 }
 
             default:

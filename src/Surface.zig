@@ -1186,6 +1186,16 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
             };
         },
 
+        .command_busy => |busy| {
+            _ = self.rt_app.performAction(
+                .{ .surface = self },
+                .command_busy,
+                busy,
+            ) catch |err| {
+                log.warn("apprt failed to report command busy err={}", .{err});
+            };
+        },
+
         .program_status => |v| {
             // The message owns the text; the apprt copies what it keeps before
             // performAction returns, so a sentinel copy on the stack is enough.

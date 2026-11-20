@@ -1069,6 +1069,7 @@ typedef enum {
   GHOSTTY_ACTION_MOVE_TAB_TO_NEW_WINDOW,
   GHOSTTY_ACTION_RESIZE_WINDOW,
   GHOSTTY_ACTION_PROGRAM_STATUS,
+  GHOSTTY_ACTION_COMMAND_BUSY,
 } ghostty_action_tag_e;
 
 typedef union {
@@ -1112,6 +1113,11 @@ typedef union {
   ghostty_action_search_total_s search_total;
   ghostty_action_search_selected_s search_selected;
   ghostty_action_program_status_s program_status;
+  // True while a command is running in the surface. Unlike
+  // `GHOSTTY_ACTION_COMMAND_FINISHED` this is not about shell integration
+  // reporting: it is only "something is running", for apprts that show
+  // activity (a tab spinner, for example).
+  bool command_busy;
   ghostty_action_readonly_e readonly;
   ghostty_action_open_config_e open_config;
 } ghostty_action_u;

@@ -38,6 +38,11 @@ extension Ghostty {
         /// user.
         @Published var programStatus: Action.ProgramStatus?
 
+        /// True while a command is running in this surface, from the shell
+        /// integration marks. This covers everything that does not report its
+        /// own status, which is most commands (`brew upgrade`, `make`, ...).
+        @Published var commandBusy: Bool = false
+
         // The currently active key tables. Empty if no tables are active.
         @Published var keyTables: [String] = []
 

@@ -703,14 +703,21 @@ pub const StreamHandler = struct {
 
             .alt_screen_legacy => {
                 try self.terminal.switchScreenMode(.@"47", enabled);
+                if (enabled) self.surfaceMessageWriter(.{ .command_busy = false });
             },
 
             .alt_screen => {
                 try self.terminal.switchScreenMode(.@"1047", enabled);
+                if (enabled) self.surfaceMessageWriter(.{ .command_busy = false });
             },
 
             .alt_screen_save_cursor_clear_enter => {
                 try self.terminal.switchScreenMode(.@"1049", enabled);
+                // A full-screen program owns the surface from here: it is not
+                // a command you are waiting on, and it usually reports its own
+                // status if it has one. Without this, every vim/less/tmux/agent
+                // session would spin for its whole life.
+                if (enabled) self.surfaceMessageWriter(.{ .command_busy = false });
             },
 
             // Mode 1048 is xterm's conditional save cursor depending
@@ -1484,6 +1491,7 @@ pub const StreamHandler = struct {
         switch (cmd.action) {
             .end_input_start_output => {
                 self.surfaceMessageWriter(.start_command);
+                self.surfaceMessageWriter(.{ .command_busy = true });
             },
 
             .end_command => {
@@ -1496,6 +1504,7 @@ pub const StreamHandler = struct {
                 };
 
                 self.surfaceMessageWriter(.{ .stop_command = code });
+                self.surfaceMessageWriter(.{ .command_busy = false });
             },
 
             // Handled by Terminal, no special handling by us

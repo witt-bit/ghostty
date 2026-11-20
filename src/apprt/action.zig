@@ -370,6 +370,12 @@ pub const Action = union(Key) {
     /// "still working" apart from "waiting for you".
     program_status: ProgramStatus,
 
+    /// True while a command is running in the surface. This is the command
+    /// level signal: a program that reports its own status (OSC 7501) is more
+    /// precise, but most commands say nothing at all, and a tab spinner that
+    /// only reacts to cooperative programs is useless for `brew upgrade`.
+    command_busy: bool,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -443,6 +449,7 @@ pub const Action = union(Key) {
         move_tab_to_new_window,
         resize_window,
         program_status,
+        command_busy,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");

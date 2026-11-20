@@ -52,6 +52,17 @@ class QuickTerminalTab: ObservableObject, Identifiable {
         let message: String
     }
 
+    /// Whether a command in the focused surface has been running long enough
+    /// to be worth showing. Commands that finish quickly (`ls`) would only
+    /// flash the indicator, so a command has to survive
+    /// `commandBusyDelay` before it counts as activity.
+    @Published private(set) var commandBusy: Bool = false
+
+    /// How long a command has to run before its indicator appears.
+    private static let commandBusyDelay: TimeInterval = 0.7
+
+    private var commandBusyTimer: Timer?
+
     /// The activity indicator for the tab, or nil when nothing is running.
     ///
     /// `OSC 7501` wins over `OSC 9;4` because it knows about blocked programs;
@@ -79,6 +90,12 @@ class QuickTerminalTab: ObservableObject, Identifiable {
             case .idle, .done, .error, .clear:
                 return nil
             }
+        }
+
+        // A command is running: this is the fallback for everything that does
+        // not report status itself, which is most of what you actually wait on.
+        if commandBusy {
+            return Activity(kind: .working, blockReason: nil, percent: nil, message: "")
         }
 
         guard isBusy else { return nil }
@@ -118,8 +135,29 @@ class QuickTerminalTab: ObservableObject, Identifiable {
         subscribeToSurface(surface)
     }
 
+    private func commandBusyChanged(_ busy: Bool) {
+        commandBusyTimer?.invalidate()
+        commandBusyTimer = nil
+
+        guard busy else {
+            commandBusy = false
+            return
+        }
+
+        commandBusyTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.commandBusyDelay,
+            repeats: false
+        ) { [weak self] _ in
+            self?.commandBusy = true
+            self?.commandBusyTimer = nil
+        }
+    }
+
     private func subscribeToSurface(_ surface: Ghostty.SurfaceView?) {
         cancellables.removeAll()
+        commandBusyTimer?.invalidate()
+        commandBusyTimer = nil
+        commandBusy = false
         guard let surface else {
             backgroundColor = nil
             backgroundOpacity = 1
@@ -157,6 +195,17 @@ class QuickTerminalTab: ObservableObject, Identifiable {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 self?.surfaceProgramStatus = status
+            }
+            .store(in: &cancellables)
+
+        // Command level activity. Delayed on the way in so short commands do
+        // not flash, but immediate on the way out so the indicator never
+        // lingers after the command is gone.
+        surface.$commandBusy
+            .receive(on: DispatchQueue.main)
+            .removeDuplicates()
+            .sink { [weak self] busy in
+                self?.commandBusyChanged(busy)
             }
             .store(in: &cancellables)
 

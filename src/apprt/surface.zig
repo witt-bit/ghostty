@@ -145,6 +145,12 @@ pub const Message = union(enum) {
     /// you" without the apprt having to guess from output activity.
     program_status: ProgramStatus,
 
+    /// Whether a command is running in this surface, from the shell
+    /// integration marks (`OSC 133`) or the alternate screen. Cooperative
+    /// programs report finer detail with `program_status`; this is the
+    /// fallback that covers everything else.
+    command_busy: bool,
+
     /// A command has started in the shell, start a timer.
     start_command,
 
