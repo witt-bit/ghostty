@@ -61,53 +61,65 @@ struct QuickTerminalTabBarView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            renderTabBar()
-            renderAddNewTabButton()
+        GeometryReader { geometry in
+            let layout = TabBarLayout(
+                availableWidth: geometry.size.width,
+                tabCount: tabManager.tabs.count
+            )
+
+            HStack(spacing: 0) {
+                renderTabBar(layout)
+                if layout.showsOverflow {
+                    renderOverflowButton(layout)
+                }
+                renderAddNewTabButton()
+            }
         }
         .frame(height: Constants.height)
         .background(tabBarBackgroundColor)
     }
 
-    @ViewBuilder private func renderTabBar() -> some View {
-        GeometryReader { geometry in
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        ForEach(Array(tabManager.tabs.enumerated()), id: \.element.id) { index, tab in
-                            renderDraggableTab(tab, at: index)
-                        }
+    @ViewBuilder private func renderTabBar(_ layout: TabBarLayout) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(Array(layout.visibleTabs(tabManager.tabs).enumerated()), id: \.element.id) { index, tab in
+                        renderDraggableTab(tab, at: index, layout: layout)
                     }
-                    .frame(minWidth: geometry.size.width)
-                    .animation(.easeInOut(duration: 0.2), value: tabManager.dropTargetIndex)
-                    // Transparent underlay covering the whole scroll content.
-                    // Its only job is to be a drop destination across the bar
-                    // so NSScrollView's built-in autoscroll engages even when
-                    // the cursor is over a gap or past the last tab.
-                    .background(TabBarDropTarget(tabManager: tabManager))
                 }
-                .onAppear {
-                    // `.onChange` only fires on *changes*, but on restoration the
-                    // active tab is already set before this view appears — so we
-                    // need to scroll it into view explicitly on first layout.
-                    // The async delay lets the ScrollView lay out its content first.
-                    guard let tabId = tabManager.currentTab?.id else { return }
-                    DispatchQueue.main.async {
+                .frame(minWidth: layout.tabAreaWidth)
+                .animation(.easeInOut(duration: 0.2), value: tabManager.dropTargetIndex)
+                // Transparent underlay covering the whole scroll content.
+                // Its only job is to be a drop destination across the bar
+                // so NSScrollView's built-in autoscroll engages even when
+                // the cursor is over a gap or past the last tab.
+                .background(TabBarDropTarget(tabManager: tabManager))
+            }
+            .onAppear {
+                // `.onChange` only fires on *changes*, but on restoration the
+                // active tab is already set before this view appears — so we
+                // need to scroll it into view explicitly on first layout.
+                // The async delay lets the ScrollView lay out its content first.
+                guard let tabId = tabManager.currentTab?.id else { return }
+                DispatchQueue.main.async {
+                    proxy.scrollTo(tabId, anchor: .center)
+                }
+            }
+            .onChange(of: tabManager.currentTab?.id) { newTabId in
+                if let tabId = newTabId {
+                    withAnimation {
                         proxy.scrollTo(tabId, anchor: .center)
-                    }
-                }
-                .onChange(of: tabManager.currentTab?.id) { newTabId in
-                    if let tabId = newTabId {
-                        withAnimation {
-                            proxy.scrollTo(tabId, anchor: .center)
-                        }
                     }
                 }
             }
         }
     }
 
-    @ViewBuilder private func renderDraggableTab(_ tab: QuickTerminalTab, at index: Int) -> some View {
+    @ViewBuilder private func renderDraggableTab(
+        _ tab: QuickTerminalTab,
+        at index: Int,
+        layout: TabBarLayout
+    ) -> some View {
         let isDraggedTab = tabManager.draggedTab?.id == tab.id
         let sourceIndex = tabManager.draggedTab.flatMap { drag in
             tabManager.tabs.firstIndex(where: { $0.id == drag.id })
@@ -119,17 +131,17 @@ struct QuickTerminalTabBarView: View {
         if let dropIndex = tabManager.dropTargetIndex,
            let source = sourceIndex,
            dropIndex == index && source > index && !isDraggedTab {
-            renderDropPlaceholder()
+            renderDropPlaceholder(layout: layout)
         }
 
         // The tab itself (collapsed when being dragged elsewhere)
         if isDraggedTab {
-            renderTabItem(tab, index: index)
+            renderTabItem(tab, index: index, layout: layout)
                 .id(tab.id)
                 .opacity(0)
                 .frame(width: dropTargetIsAtSource ? nil : 0)
         } else {
-            renderTabItem(tab, index: index)
+            renderTabItem(tab, index: index, layout: layout)
                 .id(tab.id)
         }
 
@@ -137,15 +149,18 @@ struct QuickTerminalTabBarView: View {
         if let dropIndex = tabManager.dropTargetIndex,
            let source = sourceIndex,
            dropIndex == index && source < index && !isDraggedTab {
-            renderDropPlaceholder()
+            renderDropPlaceholder(layout: layout)
         }
     }
 
-    @ViewBuilder private func renderDropPlaceholder() -> some View {
+    @ViewBuilder private func renderDropPlaceholder(layout: TabBarLayout) -> some View {
         Rectangle()
             .fill(Color.clear)
             .frame(
-                width: tabManager.draggedTabWidth ?? Constants.dropPlaceholderWidth,
+                // The gap the dragged tab leaves behind must not be wider than
+                // a slot, or the bar would push tabs into the overflow menu
+                // mid-drag.
+                width: min(tabManager.draggedTabWidth ?? layout.tabWidth, layout.tabWidth),
                 height: Constants.height
             )
     }
@@ -170,7 +185,11 @@ struct QuickTerminalTabBarView: View {
         .help("Create a new Tab")
     }
 
-    @ViewBuilder private func renderTabItem(_ tab: QuickTerminalTab, index: Int) -> some View {
+    @ViewBuilder private func renderTabItem(
+        _ tab: QuickTerminalTab,
+        index: Int,
+        layout: TabBarLayout
+    ) -> some View {
         // Look up the keyboard shortcut for goto_tab:N (1-indexed)
         let tabNumber = index + 1
         let shortcut = tabNumber <= 9 ? tabManager.config?.keyboardShortcut(for: "goto_tab:\(tabNumber)") : nil
@@ -190,7 +209,8 @@ struct QuickTerminalTabBarView: View {
                         tabManager.closeTab(tab)
                     }
                 },
-                shortcut: shortcut
+                shortcut: shortcut,
+                isCondensed: layout.isCondensed
             )
             .modifier(QuickTerminalTabContextMenu(
                 tab: tab,
@@ -208,10 +228,72 @@ struct QuickTerminalTabBarView: View {
             tab: tab,
             tabManager: tabManager
         )
-        .frame(maxWidth: .infinity)
+        // Every tab gets the same width from the layout: tabs stop expanding
+        // only when the bar is full, which is what makes room for more of them.
+        .frame(width: layout.tabWidth)
 
         Divider()
+            .frame(width: Constants.dividerWidth)
             .background(Color(NSColor.separatorColor))
+    }
+
+    /// The overflow ("»") button. Shows up only when the tabs can no longer
+    /// shrink to `collapsedWidth` and keep fitting; the tabs that didn't make
+    /// it are listed here in order, with the active one marked.
+    @ViewBuilder private func renderOverflowButton(_ layout: TabBarLayout) -> some View {
+        let hidden = layout.hiddenTabs(tabManager.tabs)
+        let activeOffset = tabManager.currentTab.flatMap { current in
+            hidden.firstIndex(where: { $0.id == current.id })
+        }
+
+        Menu {
+            ForEach(Array(hidden.enumerated()), id: \.element.id) { offset, tab in
+                Button {
+                    tabManager.selectTab(tab)
+                } label: {
+                    Label(
+                        "\(layout.visibleCount + offset + 1). \(displayTitle(for: tab))",
+                        systemImage: overflowIcon(for: tab)
+                    )
+                }
+            }
+        } label: {
+            HStack(spacing: 2) {
+                Image(systemName: "chevron.right.2")
+                    .font(.system(size: Constants.overflowChevronFontSize, weight: .semibold))
+
+                // When the active tab is one of the squeezed-out ones, its
+                // position number keeps "where am I" answerable without
+                // opening the menu.
+                if let activeOffset {
+                    Text("\(layout.visibleCount + activeOffset + 1)")
+                        .font(.system(size: Constants.overflowChevronFontSize))
+                }
+            }
+            .foregroundColor(Color(NSColor.secondaryLabelColor))
+            .frame(width: Constants.overflowButtonWidth, height: Constants.height)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("\(hidden.count) more tab\(hidden.count == 1 ? "" : "s")")
+    }
+
+    private func displayTitle(for tab: QuickTerminalTab) -> String {
+        QuickTerminalController.computeTitle(
+            title: tab.title,
+            bell: tab.surfaceBell,
+            config: ghostty.config
+        )
+    }
+
+    private func overflowIcon(for tab: QuickTerminalTab) -> String {
+        if tabManager.currentTab?.id == tab.id { return "checkmark" }
+        switch tab.activity?.kind {
+        case .some(.working): return "arrow.triangle.2.circlepath"
+        case .some(.blocked): return "exclamationmark.circle.fill"
+        case .none: return "rectangle"
+        }
     }
 }
 
@@ -219,8 +301,85 @@ extension QuickTerminalTabBarView {
     enum Constants {
         static let height: CGFloat = 24
         static let addNewTabButtonHorizontalPadding: CGFloat = 8
-        static let addNewTabButtonSize: CGFloat = 50
-        static let dropPlaceholderWidth: CGFloat = QuickTerminalTabItemView.Constants.minWidth
+        /// The new-tab button is square: its frame is `Constants.height` wide.
+        static let addNewTabButtonWidth: CGFloat = height
+        static let dividerWidth: CGFloat = 1
+        static let overflowButtonWidth: CGFloat = 30
+        static let overflowChevronFontSize: CGFloat = 9
+        /// Below this a tab has no room for a readable title, so it drops to
+        /// the leading slot alone (close button on hover, indicator otherwise).
+        static let titleVisibilityWidth: CGFloat = 64
+        /// The minimum extent a tab occupies, divider included.
+        static let collapsedTabExtent: CGFloat =
+            QuickTerminalTabItemView.Constants.collapsedWidth + dividerWidth
+    }
+
+    /// How the bar divides its width between the tabs, the overflow button and
+    /// the new-tab button.
+    ///
+    /// Tabs shrink together as they multiply, all the way down to
+    /// `collapsedTabExtent` -- a tab showing just its leading slot, i.e. the
+    /// close button (or the busy indicator) and nothing else. Only when even
+    /// that no longer fits do the tail tabs move into the overflow menu, which
+    /// keeps a bar scannable up to roughly `tabAreaWidth / collapsedTabExtent`
+    /// tabs (about 30 on a 1100pt bar) before anything is hidden.
+    struct TabBarLayout {
+        /// Width of one tab, divider excluded.
+        let tabWidth: CGFloat
+        /// How many tabs render in the bar; the rest live in the menu.
+        let visibleCount: Int
+        /// How much width the scrolling tab strip itself gets.
+        let tabAreaWidth: CGFloat
+        /// Whether the overflow button is shown at all.
+        let showsOverflow: Bool
+        /// Whether tabs are squeezed past the point of showing a title.
+        let isCondensed: Bool
+
+        init(availableWidth: CGFloat, tabCount: Int) {
+            let count = max(tabCount, 1)
+            let constants = QuickTerminalTabBarView.Constants.self
+            let collapsed = constants.collapsedTabExtent
+
+            // Width left for the tabs once the buttons that sit outside the
+            // strip have taken theirs.
+            func area(for visible: Int) -> CGFloat {
+                let overflow = visible < count ? constants.overflowButtonWidth : 0
+                return availableWidth - constants.addNewTabButtonWidth - overflow
+            }
+
+            // Hand one tab after another to the overflow menu until the
+            // survivors can each keep their collapsed width. Spending room on
+            // the button only pays off once that is true.
+            var visible = count
+            while visible > 1, area(for: visible) / CGFloat(visible) < collapsed {
+                visible -= 1
+            }
+
+            let areaWidth = area(for: visible)
+            // Round down so the slots plus their dividers never add up to a
+            // hair more than the strip and make the scroll view scroll.
+            let tabWidth = (areaWidth / CGFloat(visible) - constants.dividerWidth)
+                .rounded(.down)
+
+            self.tabAreaWidth = max(0, areaWidth)
+            self.visibleCount = visible
+            self.showsOverflow = visible < count
+            self.tabWidth = max(
+                QuickTerminalTabItemView.Constants.collapsedWidth,
+                tabWidth
+            )
+            self.isCondensed = tabWidth < constants.titleVisibilityWidth
+        }
+
+        /// The tabs that render in the bar, in order.
+        func visibleTabs(_ tabs: [QuickTerminalTab]) -> [QuickTerminalTab] {
+            Array(tabs.prefix(visibleCount))
+        }
+
+        /// The tabs the overflow menu lists, in order.
+        func hiddenTabs(_ tabs: [QuickTerminalTab]) -> [QuickTerminalTab] {
+            Array(tabs.dropFirst(visibleCount))
+        }
     }
 }
 

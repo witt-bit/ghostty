@@ -17,6 +17,11 @@ struct QuickTerminalTabItemView: View {
     let onSelect: () -> Void
     let onClose: () -> Void
     let shortcut: KeyboardShortcut?
+    /// Whether the bar squeezed this tab so far that a title can't be read.
+    /// A condensed tab keeps only the leading slot -- the close button while
+    /// hovered, the activity indicator otherwise -- so the bar can pack more
+    /// tabs before it has to spill into the overflow menu.
+    let isCondensed: Bool
 
     private var displayTitle: String {
         QuickTerminalController.computeTitle(title: tab.title, bell: tab.surfaceBell, config: config)
@@ -71,15 +76,22 @@ struct QuickTerminalTabItemView: View {
     var body: some View {
         HStack(spacing: Constants.horizontalSpacing) {
             renderLeadingSlot()
-            renderTitle()
-            renderColorIndicator()
-            if let shortcut = shortcut {
-                renderShortcut(shortcut)
+            if !isCondensed {
+                renderTitle()
+                renderColorIndicator()
+                if let shortcut = shortcut {
+                    renderShortcut(shortcut)
+                }
             }
         }
         .padding(.horizontal, Constants.horizontalPadding)
         .frame(height: Constants.height)
-        .frame(minWidth: Constants.minWidth, maxWidth: .infinity)
+        // The bar hands every tab an explicit width; `collapsedWidth` is the
+        // floor, enough for the leading slot and nothing else.
+        .frame(minWidth: Constants.collapsedWidth, maxWidth: .infinity)
+        // Titles truncate long before the bar runs out of room, so the tooltip
+        // is the only way to read a full one.
+        .help(displayTitle)
         .background(
             Rectangle()
                 .fill(backgroundColor)
@@ -207,7 +219,10 @@ struct QuickTerminalTabItemView: View {
 
 extension QuickTerminalTabItemView {
     enum Constants {
-        static let minWidth: CGFloat = 180
+        /// The width a tab shrinks to when the bar runs out of room: the
+        /// leading slot and its padding, nothing else. Hovering still reveals
+        /// the close button because that is what the slot switches to.
+        static let collapsedWidth: CGFloat = horizontalPadding * 2 + leadingSlotSize
         static let height: CGFloat = 24
         static let horizontalSpacing: CGFloat = 4
         static let horizontalPadding: CGFloat = 8
