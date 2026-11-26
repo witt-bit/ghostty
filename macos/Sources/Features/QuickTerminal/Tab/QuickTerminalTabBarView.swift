@@ -87,7 +87,11 @@ struct QuickTerminalTabBarView: View {
                         renderDraggableTab(tab, at: index, layout: layout)
                     }
                 }
-                .frame(minWidth: layout.tabAreaWidth)
+                // Left aligned: the slots add up to the area exactly (see
+                // `width(for:)`), so any leftover here would be a rounding
+                // remainder, and a centered one would show as a strip at both
+                // ends of the bar.
+                .frame(minWidth: layout.tabAreaWidth, alignment: .leading)
                 .animation(.easeInOut(duration: 0.2), value: tabManager.dropTargetIndex)
                 // Transparent underlay covering the whole scroll content.
                 // Its only job is to be a drop destination across the bar
@@ -131,7 +135,7 @@ struct QuickTerminalTabBarView: View {
         if let dropIndex = tabManager.dropTargetIndex,
            let source = sourceIndex,
            dropIndex == index && source > index && !isDraggedTab {
-            renderDropPlaceholder(layout: layout)
+            renderDropPlaceholder(layout: layout, at: index)
         }
 
         // The tab itself (collapsed when being dragged elsewhere)
@@ -149,18 +153,18 @@ struct QuickTerminalTabBarView: View {
         if let dropIndex = tabManager.dropTargetIndex,
            let source = sourceIndex,
            dropIndex == index && source < index && !isDraggedTab {
-            renderDropPlaceholder(layout: layout)
+            renderDropPlaceholder(layout: layout, at: index)
         }
     }
 
-    @ViewBuilder private func renderDropPlaceholder(layout: TabBarLayout) -> some View {
+    @ViewBuilder private func renderDropPlaceholder(layout: TabBarLayout, at index: Int) -> some View {
         Rectangle()
             .fill(Color.clear)
             .frame(
                 // The gap the dragged tab leaves behind must not be wider than
                 // a slot, or the bar would push tabs into the overflow menu
                 // mid-drag.
-                width: min(tabManager.draggedTabWidth ?? layout.tabWidth, layout.tabWidth),
+                width: min(tabManager.draggedTabWidth ?? layout.width(for: index), layout.width(for: index)),
                 height: Constants.height
             )
     }
@@ -228,9 +232,10 @@ struct QuickTerminalTabBarView: View {
             tab: tab,
             tabManager: tabManager
         )
-        // Every tab gets the same width from the layout: tabs stop expanding
-        // only when the bar is full, which is what makes room for more of them.
-        .frame(width: layout.tabWidth)
+        // Every tab gets the same width from the layout, give or take the one
+        // point the remainder pass hands to the first few so the strip fills
+        // the bar exactly.
+        .frame(width: layout.width(for: index))
 
         Divider()
             .frame(width: Constants.dividerWidth)
@@ -326,6 +331,9 @@ extension QuickTerminalTabBarView {
     struct TabBarLayout {
         /// Width of one tab, divider excluded.
         let tabWidth: CGFloat
+        /// How many of the leading tabs are one point wider than `tabWidth` to
+        /// use up the division remainder.
+        let remainderCount: Int
         /// How many tabs render in the bar; the rest live in the menu.
         let visibleCount: Int
         /// How much width the scrolling tab strip itself gets.
@@ -360,15 +368,28 @@ extension QuickTerminalTabBarView {
             // hair more than the strip and make the scroll view scroll.
             let tabWidth = (areaWidth / CGFloat(visible) - constants.dividerWidth)
                 .rounded(.down)
+            let filledWidth = max(
+                QuickTerminalTabItemView.Constants.collapsedWidth,
+                tabWidth
+            )
+            // Whatever rounding left over goes to the first few tabs, one point
+            // each. Leftover width would otherwise show up as a strip at the
+            // ends of the bar instead of a tab.
+            let remainder = areaWidth - CGFloat(visible) * (filledWidth + constants.dividerWidth)
 
             self.tabAreaWidth = max(0, areaWidth)
             self.visibleCount = visible
             self.showsOverflow = visible < count
-            self.tabWidth = max(
-                QuickTerminalTabItemView.Constants.collapsedWidth,
-                tabWidth
-            )
-            self.isCondensed = tabWidth < constants.titleVisibilityWidth
+            self.tabWidth = filledWidth
+            self.remainderCount = min(visible, max(0, Int(remainder.rounded())))
+            self.isCondensed = filledWidth < constants.titleVisibilityWidth
+        }
+
+        /// Width of the tab at `index`. Equal slots, except that the first
+        /// `remainderCount` are one point wider so the strip adds up to
+        /// `tabAreaWidth` exactly rather than leaving a gap at the ends.
+        func width(for index: Int) -> CGFloat {
+            tabWidth + (index < remainderCount ? 1 : 0)
         }
 
         /// The tabs that render in the bar, in order.
