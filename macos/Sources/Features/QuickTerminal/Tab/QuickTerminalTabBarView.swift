@@ -84,9 +84,7 @@ struct QuickTerminalTabBarView: View {
             // drew outside its bounds would be clipped away.
             .zIndex(1)
             .overlay(alignment: .topLeading) {
-                if layout.isCondensed {
-                    renderCondensedPreview(layout)
-                }
+                renderHoveredTitlePreview(layout)
             }
         }
         .frame(height: Constants.height)
@@ -308,10 +306,20 @@ struct QuickTerminalTabBarView: View {
     /// The title of a squeezed tab, floated over the strip while the pointer is
     /// on it. Kept inside the bar's own height so nothing has to draw over the
     /// terminal surface below.
-    @ViewBuilder private func renderCondensedPreview(_ layout: TabBarLayout) -> some View {
+    /// The title of a tab whose own width can't show it in full, floated over
+    /// the strip while the pointer is on it. Kept inside the bar's own height so
+    /// nothing has to draw over the terminal surface below.
+    ///
+    /// ".help" is still on every tab, but the system tooltip needs a second and
+    /// a half before it appears, which is far too late to be how you tell a row
+    /// of identical slivers apart.
+    @ViewBuilder private func renderHoveredTitlePreview(_ layout: TabBarLayout) -> some View {
         if let id = hoveredTabID,
            let index = tabManager.tabs.firstIndex(where: { $0.id == id }),
-           index < layout.visibleCount {
+           index < layout.visibleCount,
+           // Only when the tab is too narrow to have shown the title itself.
+           // Otherwise the preview would cover neighbours for nothing.
+           layout.width(for: index) < Constants.titleRevealWidth {
             Text(displayTitle(for: tabManager.tabs[index]))
                 .font(.system(size: Constants.previewFontSize))
                 .lineLimit(1)
@@ -327,6 +335,9 @@ struct QuickTerminalTabBarView: View {
                         .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
                 )
                 .offset(x: previewOffset(for: index, in: layout), y: 2)
+                // Slides between tabs instead of teleporting: the label is the
+                // only thing that moves, the tabs underneath stay put.
+                .animation(.easeOut(duration: 0.10), value: hoveredTabID)
                 .allowsHitTesting(false)
         }
     }
@@ -370,6 +381,9 @@ extension QuickTerminalTabBarView {
         /// Below this a tab has no room for a readable title, so it drops to
         /// the leading slot alone (close button on hover, indicator otherwise).
         static let titleVisibilityWidth: CGFloat = 64
+        /// Below this a tab's title is clipped, so hovering it shows the full
+        /// title as a preview.
+        static let titleRevealWidth: CGFloat = 120
         /// The floating title preview shown while hovering a squeezed tab.
         static let previewFontSize: CGFloat = 11
         static let previewHeight: CGFloat = 20
