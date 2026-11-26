@@ -13,6 +13,11 @@ struct QuickTerminalTabBarView: View {
     @ObservedObject var tabManager: QuickTerminalTabManager
 
     @State private var isHoveringNewTabButton = false
+    /// The tab under the pointer, used to preview the title of a condensed tab:
+    /// at `collapsedWidth` there is no room to draw one in the tab itself.
+    /// Keyed by id rather than index so a tab closing under the pointer cannot
+    /// turn the preview into someone else's title.
+    @State private var hoveredTabID: QuickTerminalTab.ID?
 
     /// Whether the glass effect is enabled in the config
     private var isGlassEnabled: Bool {
@@ -73,6 +78,15 @@ struct QuickTerminalTabBarView: View {
                     renderOverflowButton(layout)
                 }
                 renderAddNewTabButton()
+            }
+            // The preview is drawn by the bar, not by the tab: a squeezed tab
+            // is ~30pt wide and lives inside its own NSView, so anything it
+            // drew outside its bounds would be clipped away.
+            .zIndex(1)
+            .overlay(alignment: .topLeading) {
+                if layout.isCondensed {
+                    renderCondensedPreview(layout)
+                }
             }
         }
         .frame(height: Constants.height)
@@ -214,7 +228,14 @@ struct QuickTerminalTabBarView: View {
                     }
                 },
                 shortcut: shortcut,
-                isCondensed: layout.isCondensed
+                isCondensed: layout.isCondensed,
+                onHoverChange: { hovering in
+                    if hovering {
+                        hoveredTabID = tab.id
+                    } else if hoveredTabID == tab.id {
+                        hoveredTabID = nil
+                    }
+                }
             )
             .modifier(QuickTerminalTabContextMenu(
                 tab: tab,
@@ -284,6 +305,41 @@ struct QuickTerminalTabBarView: View {
         .help("\(hidden.count) more tab\(hidden.count == 1 ? "" : "s")")
     }
 
+    /// The title of a squeezed tab, floated over the strip while the pointer is
+    /// on it. Kept inside the bar's own height so nothing has to draw over the
+    /// terminal surface below.
+    @ViewBuilder private func renderCondensedPreview(_ layout: TabBarLayout) -> some View {
+        if let id = hoveredTabID,
+           let index = tabManager.tabs.firstIndex(where: { $0.id == id }),
+           index < layout.visibleCount {
+            Text(displayTitle(for: tabManager.tabs[index]))
+                .font(.system(size: Constants.previewFontSize))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundColor(Color(NSColor.labelColor))
+                .padding(.horizontal, 6)
+                // Capped so a long title cannot run past the bar's right edge.
+                .frame(maxWidth: Constants.previewAssumedWidth, alignment: .leading)
+                .frame(height: Constants.previewHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: Constants.previewCornerRadius)
+                        .fill(Color(NSColor.windowBackgroundColor))
+                        .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
+                )
+                .offset(x: previewOffset(for: index, in: layout), y: 2)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Where the preview sits: over the hovered tab, pulled back from the right
+    /// edge so it stays inside the bar.
+    private func previewOffset(for index: Int, in layout: TabBarLayout) -> CGFloat {
+        let left = (0..<index).reduce(CGFloat.zero) { sum, i in
+            sum + layout.width(for: i) + Constants.dividerWidth
+        }
+        return min(max(0, left), max(0, layout.tabAreaWidth - Constants.previewAssumedWidth))
+    }
+
     private func displayTitle(for tab: QuickTerminalTab) -> String {
         QuickTerminalController.computeTitle(
             title: tab.title,
@@ -314,6 +370,12 @@ extension QuickTerminalTabBarView {
         /// Below this a tab has no room for a readable title, so it drops to
         /// the leading slot alone (close button on hover, indicator otherwise).
         static let titleVisibilityWidth: CGFloat = 64
+        /// The floating title preview shown while hovering a squeezed tab.
+        static let previewFontSize: CGFloat = 11
+        static let previewHeight: CGFloat = 20
+        static let previewCornerRadius: CGFloat = 4
+        /// How wide the preview is assumed to be when keeping it on screen.
+        static let previewAssumedWidth: CGFloat = 220
         /// The minimum extent a tab occupies, divider included.
         static let collapsedTabExtent: CGFloat =
             QuickTerminalTabItemView.Constants.collapsedWidth + dividerWidth

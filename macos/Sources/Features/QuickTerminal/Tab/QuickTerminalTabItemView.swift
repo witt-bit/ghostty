@@ -22,6 +22,10 @@ struct QuickTerminalTabItemView: View {
     /// hovered, the activity indicator otherwise -- so the bar can pack more
     /// tabs before it has to spill into the overflow menu.
     let isCondensed: Bool
+    /// Reported up to the bar so it can show the condensed tab's title as a
+    /// preview while the pointer is over it: a squeezed tab has no room to
+    /// draw one itself.
+    let onHoverChange: (Bool) -> Void
 
     private var displayTitle: String {
         QuickTerminalController.computeTitle(title: tab.title, bell: tab.surfaceBell, config: config)
@@ -29,6 +33,11 @@ struct QuickTerminalTabItemView: View {
 
     @State private var isHovering = false
     @State private var isHoveringCloseButton = false
+    /// Whether the pointer is over the leading slot itself. A condensed tab is
+    /// only ~30pt wide, so letting a hover anywhere on it reveal the close
+    /// button would put the close target under a good half of its area and
+    /// turn "switch to this tab" into "close this tab" often enough to hurt.
+    @State private var isHoveringLeadingSlot = false
 
     private var surfaceColor: NSColor {
         tab.backgroundColor.map { NSColor($0) } ?? .windowBackgroundColor
@@ -99,6 +108,7 @@ struct QuickTerminalTabItemView: View {
         )
         .onHover { isHovering in
             self.isHovering = isHovering
+            onHoverChange(isHovering)
         }
         .onChange(of: tabsCount) { _ in
             // SwiftUI sometimes drops the `.onHover` exit when a tab shifts
@@ -107,6 +117,7 @@ struct QuickTerminalTabItemView: View {
             // really is over this tab the next mouse move will restore it.
             isHovering = false
             isHoveringCloseButton = false
+            isHoveringLeadingSlot = false
         }
         .onTapGesture {
             DispatchQueue.main.async {
@@ -133,13 +144,21 @@ struct QuickTerminalTabItemView: View {
         .help("Click to close this tab; Option-click to close all tabs except this one")
     }
 
-    /// The leading slot shows one thing at a time: the close button while the
-    /// cursor is over the tab, and the activity indicator otherwise. Sharing
-    /// the slot keeps the indicator away from the title, and the title never
-    /// shifts because the slot keeps its width either way.
+    /// One thing at a time: the close button while the cursor is over the tab,
+    /// and the activity indicator otherwise. Sharing the slot keeps the
+    /// indicator away from the title, and the title never shifts because the
+    /// slot keeps its width either way.
+    ///
+    /// A condensed tab only reveals the close button once the pointer is over
+    /// the slot itself, so the rest of the tab stays a plain "select me"
+    /// target no matter how narrow it gets.
+    private var showsCloseButton: Bool {
+        isCondensed ? isHoveringLeadingSlot : isHovering
+    }
+
     @ViewBuilder private func renderLeadingSlot() -> some View {
         ZStack {
-            if isHovering {
+            if showsCloseButton {
                 renderCloseButton()
             } else if let activity = tab.activity {
                 renderActivityIndicator(activity)
@@ -147,6 +166,8 @@ struct QuickTerminalTabItemView: View {
         }
         .frame(width: Constants.leadingSlotSize, height: Constants.leadingSlotSize)
         .animation(.easeInOut(duration: 0.12), value: isHovering)
+        .animation(.easeInOut(duration: 0.12), value: isHoveringLeadingSlot)
+        .onHover { isHoveringLeadingSlot = $0 }
     }
 
     /// The indicator that tells you a tab is still working (or needs you)
